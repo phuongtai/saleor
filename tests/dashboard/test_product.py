@@ -218,7 +218,8 @@ def test_view_product_create(admin_client, product_type, category):
     data = {
         "name": "Product",
         "description": "This is product description.",
-        "price": 10,
+        "price_0": 10,
+        "price_1": "USD",
         "category": category.pk,
         "variant-sku": "123",
         "variant-quantity": 2,
@@ -239,7 +240,8 @@ def test_view_product_edit(admin_client, product):
     data = {
         "name": "Product second name",
         "description": "Product description.",
-        "price": 10,
+        "price_0": 10,
+        "price_1": product.price.currency,
         "category": product.category.pk,
         "variant-sku": "123",
         "variant-quantity": 10,
@@ -876,7 +878,14 @@ def test_view_attribute_create(admin_client, color_attribute):
     response = admin_client.post(url, data, follow=True)
 
     assert response.status_code == 200
-    assert Attribute.objects.count() == 2, "An attribute should have been created"
+
+    created_attribute = Attribute.objects.filter(slug="test").first()
+    assert created_attribute is not None, "An attribute should have been created"
+
+    assert created_attribute.name == "test"
+    assert (
+        created_attribute.visible_in_storefront is True
+    ), "The default value should have been used"
 
 
 def test_view_attribute_create_not_valid(admin_client, color_attribute):
@@ -900,6 +909,30 @@ def test_view_attribute_edit(color_attribute, admin_client):
     color_attribute.refresh_from_db()
     assert color_attribute.name == "new_name"
     assert color_attribute.slug == "new_slug"
+    assert (
+        color_attribute.visible_in_storefront is True
+    ), "The default value should have been used"
+
+
+def test_view_attribute_edit_with_product_type(product, admin_client):
+    old_attribute_count = Attribute.objects.count()
+    product_attribute = (
+        product.product_type.product_attributes.first()
+    )  # type: Attribute
+    url = reverse("dashboard:attribute-update", kwargs={"pk": product_attribute.pk})
+    data = {"name": "new_name", "slug": "new_slug"}
+
+    response = admin_client.post(url, data, follow=True)
+
+    assert response.status_code == 200
+    assert (
+        Attribute.objects.count() == old_attribute_count
+    ), "A new attribute shouldn't have been created"
+
+    product_attribute.refresh_from_db()
+    assert (
+        product_attribute.product_types.count() == 1
+    ), "Product type shouldn't have been unassigned"
 
 
 def test_view_attribute_delete(admin_client, color_attribute):
@@ -1061,7 +1094,8 @@ def test_product_form_change_attributes(db, product, color_attribute):
     new_author = "Main Tester"
     data = {
         "name": product.name,
-        "price": product.price.amount,
+        "price_0": product.price.amount,
+        "price_1": product.price.currency,
         "category": product.category.pk,
         "description": "description",
         "attribute-{}-{}".format(text_attribute.slug, text_attribute.pk): new_author,
@@ -1085,7 +1119,8 @@ def test_product_form_assign_collection_to_product(product):
     collection = Collection.objects.create(name="test_collections")
     data = {
         "name": product.name,
-        "price": product.price.amount,
+        "price_0": product.price.amount,
+        "price_1": product.price.currency,
         "category": product.category.pk,
         "description": "description",
         "collections": [collection.pk],
@@ -1115,7 +1150,8 @@ def test_product_form_sanitize_product_description(product_type, category, setti
         '<p><a href="www.mirumee.com">link</a></p>'
         "<p>an <script>evil()</script>example</p>"
     )
-    data["price"] = 20
+    data["price_0"] = 20
+    data["price_1"] = "USD"
 
     form = ProductForm(data, instance=product)
     assert form.is_valid()
@@ -1138,7 +1174,8 @@ def test_product_form_seo_description(unavailable_product):
         "HTML <b>shouldn't be removed</b> since it's a simple text field."
     )
     data = model_to_dict(unavailable_product)
-    data["price"] = 20
+    data["price_0"] = 20
+    data["price_1"] = "USD"
     data["description"] = "a description"
     data["seo_description"] = seo_description
 
@@ -1165,11 +1202,13 @@ def test_product_form_seo_description_too_long(unavailable_product):
     )
 
     data = model_to_dict(unavailable_product)
-    data["price"] = 20
+    data["price_0"] = 20
+    data["price_1"] = "USD"
     data["description"] = description
 
     form = ProductForm(data, instance=unavailable_product)
-    assert form.is_valid()
+    form.is_valid()
+    assert form.errors == {}
 
     form.save()
     new_seo_description = unavailable_product.seo_description

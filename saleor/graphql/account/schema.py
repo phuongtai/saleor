@@ -1,12 +1,13 @@
 import graphene
-from graphql_jwt.decorators import login_required, permission_required
+from graphql_jwt.decorators import login_required
 
 from ..core.fields import FilterInputConnectionField
 from ..core.types import FilterInputObjectType
+from ..decorators import permission_required
 from ..descriptions import DESCRIPTIONS
 from .bulk_mutations import CustomerBulkDelete, StaffBulkDelete, UserBulkSetActive
 from .enums import CountryCodeEnum
-from .filters import CustomerFilter, StaffUserFilter
+from .filters import CustomerFilter, ServiceAccountFilter, StaffUserFilter
 from .mutations.account import (
     AccountAddressCreate,
     AccountAddressDelete,
@@ -32,6 +33,13 @@ from .mutations.deprecated_account import (
     LoggedUserUpdate,
 )
 from .mutations.deprecated_staff import PasswordReset
+from .mutations.service_account import (
+    ServiceAccountClearStoredPrivateMeta,
+    ServiceAccountCreate,
+    ServiceAccountDelete,
+    ServiceAccountUpdate,
+    ServiceAccountUpdatePrivateMeta,
+)
 from .mutations.staff import (
     AddressCreate,
     AddressDelete,
@@ -48,8 +56,13 @@ from .mutations.staff import (
     UserClearStoredPrivateMeta,
     UserUpdatePrivateMeta,
 )
-from .resolvers import resolve_address_validator, resolve_customers, resolve_staff_users
-from .types import AddressValidationData, User
+from .resolvers import (
+    resolve_address_validation_rules,
+    resolve_customers,
+    resolve_service_accounts,
+    resolve_staff_users,
+)
+from .types import AddressValidationData, ServiceAccount, User
 
 
 class CustomerFilterInput(FilterInputObjectType):
@@ -62,12 +75,18 @@ class StaffUserInput(FilterInputObjectType):
         filterset_class = StaffUserFilter
 
 
+class ServiceAccountFilterInput(FilterInputObjectType):
+    class Meta:
+        filterset_class = ServiceAccountFilter
+
+
 class AccountQueries(graphene.ObjectType):
     address_validation_rules = graphene.Field(
         AddressValidationData,
-        country_code=graphene.Argument(CountryCodeEnum, required=False),
-        country_area=graphene.String(required=False),
-        city_area=graphene.String(required=False),
+        country_code=graphene.Argument(CountryCodeEnum, required=True),
+        country_area=graphene.Argument(graphene.String),
+        city=graphene.Argument(graphene.String),
+        city_area=graphene.Argument(graphene.String),
     )
     customers = FilterInputConnectionField(
         User,
@@ -82,21 +101,41 @@ class AccountQueries(graphene.ObjectType):
         description="List of the shop's staff users.",
         query=graphene.String(description=DESCRIPTIONS["user"]),
     )
+    service_accounts = FilterInputConnectionField(
+        ServiceAccount,
+        filter=ServiceAccountFilterInput(),
+        description="List of the service accounts",
+    )
+    service_account = graphene.Field(
+        ServiceAccount,
+        id=graphene.Argument(graphene.ID, required=True),
+        description="Lookup a service account by ID.",
+    )
+
     user = graphene.Field(
         User,
         id=graphene.Argument(graphene.ID, required=True),
-        description="Lookup an user by ID.",
+        description="Lookup a user by ID.",
     )
 
     def resolve_address_validation_rules(
-        self, info, country_code=None, country_area=None, city_area=None
+        self, info, country_code, country_area=None, city=None, city_area=None
     ):
-        return resolve_address_validator(
+        return resolve_address_validation_rules(
             info,
-            country_code=country_code,
+            country_code,
             country_area=country_area,
+            city=city,
             city_area=city_area,
         )
+
+    @permission_required("account.manage_service_accounts")
+    def resolve_service_accounts(self, info, **_kwargs):
+        return resolve_service_accounts(info)
+
+    @permission_required("account.manage_service_accounts")
+    def resolve_service_account(self, info, id):
+        return graphene.Node.get_node_from_global_id(info, id, ServiceAccount)
 
     @permission_required("account.manage_users")
     def resolve_customers(self, info, query=None, **_kwargs):
@@ -166,6 +205,15 @@ class AccountMutations(graphene.ObjectType):
 
     user_update_private_metadata = UserUpdatePrivateMeta.Field()
     user_clear_stored_private_metadata = UserClearStoredPrivateMeta.Field()
+
+    service_account_create = ServiceAccountCreate.Field()
+    service_account_update = ServiceAccountUpdate.Field()
+    service_account_delete = ServiceAccountDelete.Field()
+
+    service_account_update_private_metadata = ServiceAccountUpdatePrivateMeta.Field()
+    service_account_clear_stored_private_metadata = (
+        ServiceAccountClearStoredPrivateMeta.Field()
+    )
 
     # Staff deprecated mutation
     password_reset = PasswordReset.Field()
